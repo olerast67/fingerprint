@@ -4,6 +4,7 @@
 браузер такие модули не запускает. Запуск: python dev/serve.py [порт]
 """
 import functools
+import re
 import http.server
 import sys
 from pathlib import Path
@@ -18,12 +19,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         ".css": "text/css", ".html": "text/html; charset=utf-8", ".tflite": "application/octet-stream",
     }
 
+    def _host_ok(self):
+        # защита от подмены DNS: чужой сайт не должен читать файлы через этот сервер
+        return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")
+
+    def do_GET(self):
+        if not self._host_ok():
+            self.send_error(403)
+            return
+        super().do_GET()
+
+    def do_HEAD(self):
+        if not self._host_ok():
+            self.send_error(403)
+            return
+        super().do_HEAD()
+
     def do_POST(self):
         # только для проверки: страница отдаёт сюда готовый файл, он ложится в samples/private/out/browser
         from urllib.parse import parse_qs, urlparse
         u = urlparse(self.path)
-        name = Path(parse_qs(u.query).get("name", ["out.jpg"])[0]).name
-        if u.path != "/__save" or self.client_address[0] != "127.0.0.1":
+        name = parse_qs(u.query).get("name", [""])[0]
+        origin_ok = self.headers.get("Origin") in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+        if (u.path != "/__save" or self.client_address[0] != "127.0.0.1" or not self._host_ok() or not origin_ok
+                or self.headers.get("X-Dev-Save") != "1" or not re.fullmatch(r"[\w.-]+\.jpg", name)):
             self.send_error(404)
             return
         out = ROOT / "samples" / "private" / "out" / "browser"
