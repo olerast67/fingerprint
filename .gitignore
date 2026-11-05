@@ -5,6 +5,7 @@ samples/private/
 *.png
 *.heic
 !docs/**/*.png
+!web/og.png
 
 node_modules/
 .venv/
