@@ -418,7 +418,10 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
       }
       a2[y * vw + x] = m;
     }
-    alpha = a2;
+    // край почти резкий: при прозрачности 0,5 на снимке осталась бы половина исходного контраста
+    for (let i = 0; i < nv; i++) a2[i] = a2[i] > 0.5 ? 1 : 0;
+    alpha = boxMean(a2, vw, vh, 1);
+    for (let i = 0; i < nv; i++) if (a2[i]) alpha[i] = Math.max(alpha[i], 0.75);
   }
   const list = (periods.length ? periods : periodsAny).sort((a, b) => a - b);
   const P = list.length ? list[list.length >> 1] : 18, sigma = Math.min(40, Math.max(8, P));
@@ -438,12 +441,13 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
 
   progress("Проверяю результат", 75);
   // проверка с весом маски: контур пальца и фон вне кожи не дают ложной тревоги
-  const safe = erode(Uint8Array.from(alpha, (v) => (v > 0.5 ? 1 : 0)), vw, vh, 2);
+  const safe = erode(Uint8Array.from(alpha, (v) => (v > 0.5 ? 1 : 0)), vw, vh, 8);   // отступ от контура: край пальца сам похож на полосу
   const safeSum = integral(safe, vw, vh);
   const S = sampler(alpha, vw, vh, W, H);
   const weight = (x, y) => safe[S.yi[Math.min(H - 1, y)] * vw + S.xi[Math.min(W - 1, x)]];
   const covered = (x, y, s) => { const [x0, y0, x1, y1] = rectOf({ x, y, s }, k, vw, vh); const a = (x1 - x0) * (y1 - y0); return a > 0 && safeSum(x0, y0, x1, y1) >= 0.5 * a; };
-  const isResidual = (b) => score(b) >= THR && b.period <= 4 * PMAX;
+  // складки кожи крупнее трёх шагов узора остаются намеренно; линии близкого пальца уже получили свою сигму выше
+  const isResidual = (b) => score(b) >= THR && b.period <= 3 * P;
   let residual = ridgeBlocks(rgba, W, H, covered, weight).filter(isResidual);
   const firstResidual = residual.length;
   let s2 = sigma;
