@@ -1,0 +1,13 @@
+# Личные фото с видимыми пальцами: никогда не попадают в git
+samples/private/
+*.jpg
+*.jpeg
+*.png
+*.heic
+!docs/**/*.png
+
+node_modules/
+.venv/
+__pycache__/
+dist/
+.claude/
