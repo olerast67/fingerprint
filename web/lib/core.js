@@ -5,6 +5,7 @@
 export const B = 128, STEP = 64, SCALES = [1, 2, 4], PMIN = 5, PMAX = 20, THR = 0.5;
 const VIEW = 2000;           // ширина рабочей копии для маски
 const NEAR = 0.04;           // «рядом с кожей»: доля ширины кадра
+const TILE_T = 16;           // порог цвета плитки вне кожи (квадрат расстояния Махаланобиса)
 
 // ---------- БПФ 128x128 ----------
 const N = B, LOG = 7;
@@ -364,6 +365,21 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
   progress("Ищу папиллярный узор", 15);
   const blocks = ridgeBlocks(rgba, W, H, () => true);
   let hits = blocks.filter((b) => score(b) >= THR);
+  const lab = toLab(view, nv), ss = colorStats(lab, skin), skinSum = integral(skin, vw, vh);
+  // если кожа на снимке найдена, плитка с полосами вне неё должна быть похожа на эту кожу по цвету:
+  // так не трогаем одежду, дерево и ткань. Если кожи нет совсем (макро, неудачный свет), берём всё.
+  const tileOk = (b) => {
+    if (!ss) return true;
+    const [x0, y0, x1, y1] = rectOf(b, k, vw, vh), a = (x1 - x0) * (y1 - y0);
+    if (a <= 0) return false;
+    if (skinSum(x0, y0, x1, y1) >= 0.2 * a) return true;
+    let L = 0, A = 0, Bb = 0, n = 0;
+    for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) { const i = (y * vw + x) * 3; L += lab[i]; A += lab[i + 1]; Bb += lab[i + 2]; n++; }
+    return maha(Float32Array.of(L / n, A / n, Bb / n), 0, ss) < TILE_T;
+  };
+  const before = hits.length;
+  hits = hits.filter(tileOk);
+  const rejected = before - hits.length;
   const far = hits.filter((b) => !isNear(b));
   if (opts.keepFar) hits = hits.filter(isNear);
   // плитка с полосами входит в маску целиком, её середина без проверки цветом
@@ -380,9 +396,9 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
   progress("Уточняю край кожи", 40);
   // кольцо не уже двух клеток сетки модели кожи: её край может уходить внутрь пальца
   const ringW = Math.max(15, Math.ceil(2 * vw / 256));
-  const ring = dilate(hard, vw, vh, ringW), lab = toLab(view, nv);
+  const ring = dilate(hard, vw, vh, ringW);
   const bgSel = Uint8Array.from(ring, (v, i) => (v && !hard[i] ? 1 : 0));
-  const ss = colorStats(lab, skin), bs = colorStats(lab, bgSel);
+  const bs = colorStats(lab, bgSel);
   let fg = new Uint8Array(nv);
   for (let i = 0; i < nv; i++) fg[i] = skin[i] || core[i] || (ring[i] && (!ss || !bs || maha(lab, i, ss) < maha(lab, i, bs))) ? 1 : 0;
   fg = dilate(erode(fg, vw, vh, 2), vw, vh, 2);
@@ -449,7 +465,7 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
     alpha, residual: residual.map((b) => rectOf(b, k, vw, vh)),
     stats: {
       P, sigma, sigmaMax: s2, maskFrac: total / nv, checkedFrac: total ? checked / total : 0,
-      farHits: far.length, farFrac: farArea / nv, keepFar: !!opts.keepFar,
+      farHits: far.length, rejected, noSkin: !ss, farFrac: farArea / nv, keepFar: !!opts.keepFar,
       blocks: blocks.length, hits: hits.length, firstResidual, residual: residual.length, ms: Date.now() - t0,
     },
   };

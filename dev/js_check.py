@@ -29,7 +29,7 @@ def skin_conf(rgb, vw, vh):
         canvas[iy - sy:ey - sy, ix - sx:ex - sx] = rgb[iy:ey, ix:ex]
         small = cv2.resize(canvas, (256, 256), interpolation=cv2.INTER_AREA)
         r = seg.segment(mpimg(small))
-        c = sum(r.confidence_masks[i].numpy_view() for i in SKIN).astype(np.float32)
+        c = np.squeeze(sum(r.confidence_masks[i].numpy_view() for i in SKIN)).astype(np.float32)
         x0, x1 = int(ix * kx), min(vw, int(np.ceil(ex * kx)))
         y0, y1 = int(iy * kx), min(vh, int(np.ceil(ey * kx)))
         if x1 <= x0 or y1 <= y0:
