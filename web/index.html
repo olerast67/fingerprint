@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Без отпечатков</title>
+<meta name="description" content="Стирает папиллярный узор пальцев и ладоней с фото прямо в браузере. Снимок никуда не отправляется.">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<main>
+  <h1>Сотрите отпечатки пальцев с фото</h1>
+  <p class="lead">Камера телефона снимает подушечки пальцев так чётко, что по снимку можно восстановить отпечаток. Эта страница находит кожу с папиллярным узором и стирает узор так, что его не вернуть. Фото обрабатывается на вашем устройстве и никуда не отправляется.</p>
+
+  <section id="drop" class="drop">
+    <button id="pick" class="primary" type="button">Выбрать фото</button>
+    <input id="file" type="file" accept="image/*" hidden>
+  </section>
+
+  <section id="work" hidden>
+    <progress id="bar" max="100" value="0"></progress>
+    <p id="stage" aria-live="polite"></p>
+  </section>
+
+  <section id="result" hidden>
+    <div class="tabs" role="group" aria-label="Что показать">
+      <button type="button" data-show="after" aria-pressed="true">После</button>
+      <button type="button" data-show="before" aria-pressed="false">До</button>
+      <button type="button" data-show="map" aria-pressed="false">Карта</button>
+    </div>
+    <img id="shown" alt="">
+    <p id="summary"></p>
+    <div class="actions">
+      <a id="download" class="primary" href="#">Скачать фото</a>
+      <button id="again" type="button">Другое фото</button>
+    </div>
+  </section>
+
+  <section id="error" class="error" hidden>
+    <p></p>
+    <button class="retry" type="button">Попробовать снова</button>
+  </section>
+
+  <h2>Как это работает</h2>
+  <ol>
+    <li>Нейросеть MediaPipe находит на снимке кожу.</li>
+    <li>Рядом с кожей ищутся участки с ровными параллельными полосами, как у папиллярного узора. Так находятся пальцы, которые нейросеть пропустила.</li>
+    <li>На всей найденной коже детали мельче примерно трёх линий узора стираются полностью, сверху ложится мелкое зерно. Контур пальца, складки и цвет кожи остаются.</li>
+    <li>Готовый снимок проверяется ещё раз. Если где-то остались полосы, страница дочищает их и отмечает на карте.</li>
+    <li>Файл собирается заново из пикселей, поэтому в нём нет данных камеры, геометки и миниатюры оригинала.</li>
+  </ol>
+  <p>Проверка на программе для сравнения отпечатков SourceAFIS: с исходного снимка она узнаёт палец с оценкой 263 при пороге 40, после обработки оценка падает до 0–2 даже после попыток восстановить детали.</p>
+
+  <h2>Чего страница не делает</h2>
+  <ul>
+    <li>Оригинал в галерее и облаке остаётся как был. Публикуйте только обработанный файл.</li>
+    <li>Если нейросеть и поиск полос пропустили палец, он останется нетронутым. Посмотрите карту перед публикацией.</li>
+    <li>Лицо и другая биометрия не обрабатываются.</li>
+    <li>Татуировка или ткань с полосами рядом с рукой могут немного смягчиться.</li>
+    <li>Файлы HEIC открываются не во всех браузерах. Если фото не открылось, сохраните его как JPEG.</li>
+  </ul>
+</main>
+</body>
+</html>
