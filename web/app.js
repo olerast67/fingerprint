@@ -1,5 +1,4 @@
 // Страница: выбор фото, модель кожи MediaPipe, передача в фоновый поток, показ результата.
-import { FilesetResolver, ImageSegmenter } from "./vendor/tasks-vision/vision_bundle.mjs";
 
 const VIEW = 2000;
 const $ = (s) => document.querySelector(s);
@@ -8,11 +7,14 @@ const ui = {
   work: $("#work"), bar: $("#bar"), stage: $("#stage"),
   result: $("#result"), img: $("#shown"), summary: $("#summary"), download: $("#download"),
   tabs: [...document.querySelectorAll("[data-show]")], error: $("#error"), again: $("#again"),
+  rMask: $("#r-mask"), rPeriod: $("#r-period"), rCheck: $("#r-check"),
 };
 let segmenter = null, urls = {}, busy = false;
 
 async function getSegmenter() {
   if (segmenter) return segmenter;
+  // библиотеку грузим только после выбора фото: первый экран открывается без неё
+  const { FilesetResolver, ImageSegmenter } = await import("./vendor/tasks-vision/vision_bundle.mjs");
   const base = new URL(".", import.meta.url);
   const files = await FilesetResolver.forVisionTasks(new URL("vendor/tasks-vision/wasm", base).href);
   segmenter = await ImageSegmenter.createFromOptions(files, {
@@ -55,12 +57,19 @@ function setState(s) {
 
 function show(which) {
   ui.img.src = urls[which];
-  ui.img.alt = { after: "Фото после обработки", before: "Исходное фото", map: "Карта: зелёным обработанная кожа, красным места для проверки" }[which];
+  ui.img.alt = { after: "Фото после обработки", before: "Исходное фото", map: "Карта: бирюзовым обработанная кожа, пурпурным места для проверки" }[which];
   for (const t of ui.tabs) t.setAttribute("aria-pressed", String(t.dataset.show === which));
 }
 
+function readout(st) {
+  ui.rMask.textContent = `${Math.round(st.maskFrac * 100)}%`;
+  ui.rPeriod.textContent = `${Math.round(st.P)} пикс.`;
+  ui.rCheck.textContent = st.residual ? `проверить: ${st.residual}` : "чисто";
+  ui.rCheck.classList.toggle("warn", !!st.residual);
+}
+
 function describe(st) {
-  const parts = [`Обработано ${Math.round(st.maskFrac * 100)}% кадра. Шаг папиллярных линий около ${Math.round(st.P)} пикселей.`];
+  const parts = [];
   if (!st.hits) parts.push("Похожего на папиллярный узор на этом снимке почти не нашлось, кожа всё равно обработана.");
   if (st.residual) parts.push(`Проверка нашла участков для ручной проверки: ${st.residual}. Они отмечены красным на карте. Если это не пальцы и не ладонь (татуировка, ткань, складка), всё в порядке. Если это палец, не публикуйте снимок.`);
   else parts.push("Повторная проверка следов узора не нашла.");
@@ -105,6 +114,7 @@ async function handle(file) {
     ui.download.href = urls.after;
     ui.download.download = `${base}-bez-otpechatkov.jpg`;
     ui.summary.textContent = describe(done.stats);
+    readout(done.stats);
     window.__lastStats = done.stats;
     show(done.stats.residual ? "map" : "after");
     setState("done");

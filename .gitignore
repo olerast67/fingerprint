@@ -17,3 +17,6 @@ dev/afis/bin/
 dev/afis/obj/
 # модели MediaPipe скачиваются заново
 dev/models/
+
+# рабочие файлы дизайна
+.web/

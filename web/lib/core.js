@@ -400,10 +400,10 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
   }
 
   const overlay = new Uint8ClampedArray(view);
-  for (let i = 0; i < nv; i++) if (alpha[i] > 0.5) { overlay[i * 4] *= 0.5; overlay[i * 4 + 1] = overlay[i * 4 + 1] * 0.5 + 110; overlay[i * 4 + 2] *= 0.5; }
+  for (let i = 0; i < nv; i++) if (alpha[i] > 0.5) { overlay[i * 4] = overlay[i * 4] * 0.45 + 35; overlay[i * 4 + 1] = overlay[i * 4 + 1] * 0.45 + 132; overlay[i * 4 + 2] = overlay[i * 4 + 2] * 0.45 + 119; }
   for (const b of residual) {
     const x0 = Math.floor(b.x * k), y0 = Math.floor(b.y * k), x1 = Math.min(vw, Math.ceil((b.x + b.s) * k)), y1 = Math.min(vh, Math.ceil((b.y + b.s) * k));
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const o = (y * vw + x) * 4; overlay[o] = 230; overlay[o + 1] *= 0.3; overlay[o + 2] *= 0.3; }
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const o = (y * vw + x) * 4; overlay[o] = 255; overlay[o + 1] = 46; overlay[o + 2] = 136; }
   }
   progress("Готово", 100);
   let maskFrac = 0; for (let i = 0; i < nv; i++) maskFrac += alpha[i] > 0.5 ? 1 : 0;
