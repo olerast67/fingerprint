@@ -31,6 +31,9 @@ def analyse(gray: np.ndarray, d: int):
     img = img.astype(np.float32)
     # убираем неравномерный свет: вычитаем сильно размытую копию
     hp = img - cv2.GaussianBlur(img, (0, 0), 8)
+    # выравниваем контраст: резкие края не должны перекрикивать мелкую текстуру
+    sd = np.sqrt(cv2.GaussianBlur(hp * hp, (0, 0), 8)) + 1.0
+    hp = np.clip(hp / sd, -2, 2)
     g = cv2.GaussianBlur(hp, (0, 0), 1.0)
     gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
@@ -47,10 +50,17 @@ def analyse(gray: np.ndarray, d: int):
             blk = hp[y:y + B, x:x + B]
             blk = (blk - blk.mean()) * HANN
             mag = np.abs(np.fft.fft2(blk))
-            band = mag[BAND]
-            i = int(np.argmax(band))
-            peak = float(band[i] / (np.median(band) + 1e-6))
-            period = float(1 / RAD[BAND][i]) * d
+            pw = mag * mag * BAND
+            iy, ix = np.unravel_index(int(np.argmax(pw)), pw.shape)
+            # доля энергии полосы в пятне вокруг пика и его зеркала:
+            # у полос она высокая, у одиночного края размазана по линии
+            near = (np.minimum(np.abs(np.arange(B)[:, None] - iy), B - np.abs(np.arange(B)[:, None] - iy)) ** 2
+                    + np.minimum(np.abs(np.arange(B)[None, :] - ix), B - np.abs(np.arange(B)[None, :] - ix)) ** 2) <= 4
+            my, mx = (-iy) % B, (-ix) % B
+            near |= (np.minimum(np.abs(np.arange(B)[:, None] - my), B - np.abs(np.arange(B)[:, None] - my)) ** 2
+                     + np.minimum(np.abs(np.arange(B)[None, :] - mx), B - np.abs(np.arange(B)[None, :] - mx)) ** 2) <= 4
+            peak = float(pw[near].sum() / (pw.sum() + 1e-6))
+            period = float(1 / RAD[iy, ix]) * d
             contrast = float(blk.std())
             rows.append((x * d, y * d, B * d, d, coh, peak, period, contrast))
     return rows
@@ -74,15 +84,15 @@ def main(paths):
         small = cv2.resize(bgr, None, fx=k, fy=k, interpolation=cv2.INTER_AREA)
         heat = np.zeros(small.shape[:2], np.float32)
         for x, y, s, d, coh, peak, period, c in allrows:
-            score = coh * min(peak / 10, 1.0)
+            score = coh * min(peak / 0.4, 1.0)
             x0, y0, x1, y1 = (int(v * k) for v in (x, y, x + s, y + s))
             heat[y0:y1, x0:x1] = np.maximum(heat[y0:y1, x0:x1], score)
         col = cv2.applyColorMap((np.clip(heat, 0, 1) * 255).astype(np.uint8), cv2.COLORMAP_JET)
         cv2.imwrite(str(out / f"{p.stem}_map.jpg"), cv2.addWeighted(small, 0.55, col, 0.45, 0))
-        top = sorted(allrows, key=lambda r: -r[4] * min(r[5] / 10, 1))[:5]
+        top = sorted(allrows, key=lambda r: -r[4] * min(r[5] / 0.4, 1))[:5]
         print(p.name, len(allrows), "блоков; лучшие (x,y,scale,coh,peak,period):")
         for r in top:
-            print("  ", r[0], r[1], r[3], round(r[4], 2), round(r[5], 1), round(r[6], 1))
+            print("  ", r[0], r[1], r[3], round(r[4], 2), round(r[5], 2), round(r[6], 1))
 
 
 if __name__ == "__main__":
