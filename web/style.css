@@ -84,6 +84,8 @@ a { color: var(--scan); }
 @keyframes sweep { from { transform: translateY(24px); } to { transform: translateY(calc(min(62vh, 560px) - 26px)); } }
 @media (prefers-reduced-motion: reduce) { .beam { animation: none; top: 50%; opacity: 0.5; } }
 .result { padding: 18px; display: grid; gap: 14px; align-content: start; }
+.stage { position: relative; width: fit-content; max-width: 100%; margin: 0 auto; }
+#paint { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 #shown { max-width: 100%; width: auto; height: auto; max-height: 70vh; display: block; margin: 0 auto; background: #000; }
 .error { color: var(--fg); }
 .error p { color: var(--fg); max-width: 46ch; margin: 0; border-top: 2px solid var(--alarm); padding-top: 12px; }
@@ -149,3 +151,12 @@ li { margin: 8px 0; }
   .scanner { min-height: 340px; }
   .readout dl { grid-template-columns: 1fr 1fr; }
 }
+
+/* кисть и ластик */
+.tools { display: grid; gap: 10px; }
+.tools-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.tools button[aria-pressed="true"] { border-color: var(--scan); color: var(--scan); background: rgb(63 240 216 / 0.08); }
+.tools button[data-tool="remove"][aria-pressed="true"] { border-color: var(--alarm); color: var(--alarm-text); background: rgb(255 46 136 / 0.08); }
+.size { display: inline-flex; gap: 10px; align-items: center; color: var(--muted); font-size: 16px; }
+.size input { accent-color: var(--scan); width: 140px; }
+.cta-soft { border-color: var(--scan); color: var(--scan); }

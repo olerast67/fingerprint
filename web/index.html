@@ -37,7 +37,18 @@
           <button type="button" data-show="before" aria-pressed="false">До</button>
           <button type="button" data-show="map" aria-pressed="false">Карта</button>
         </div>
-        <img id="shown" alt="" width="1600" height="900">
+        <div class="stage"><img id="shown" alt="" width="1600" height="900"><canvas id="paint" hidden></canvas></div>
+        <div id="tools" class="tools" hidden>
+          <div class="tools-row" role="group" aria-label="Правка маски">
+            <button type="button" data-tool="add" aria-pressed="false">Кисть</button>
+            <button type="button" data-tool="remove" aria-pressed="false">Ластик</button>
+            <label class="size">Размер <input id="size" type="range" min="6" max="80" value="24"></label>
+          </div>
+          <div class="tools-row">
+            <button id="apply" type="button" class="cta-soft">Применить правки</button>
+            <button id="reset" type="button">Сбросить правки</button>
+          </div>
+        </div>
         <div class="actions">
           <a id="download" class="cta" href="#">Скачать чистое фото</a>
           <button id="keepfar" type="button" hidden>Вернуть полосы вне кожи</button>
@@ -92,7 +103,7 @@
     <h2>Чего страница не&nbsp;делает</h2>
     <ul class="limits">
       <li>Оригинал в&nbsp;галерее и&nbsp;облаке остаётся как&nbsp;был. Публикуйте только обработанный файл.</li>
-      <li>Если&nbsp;нейросеть и&nbsp;поиск полос пропустили палец, он&nbsp;останется нетронутым. Посмотрите карту перед публикацией.</li>
+      <li>Если&nbsp;нейросеть и&nbsp;поиск полос пропустили палец, он&nbsp;останется нетронутым. Посмотрите карту перед публикацией: пропущенное можно дообвести кистью, лишнее стереть ластиком.</li>
       <li>Лицо и&nbsp;другая биометрия не&nbsp;обрабатываются.</li>
       <li>Татуировка или&nbsp;ткань с&nbsp;полосами рядом с&nbsp;рукой могут немного смягчиться.</li>
       <li>Файлы HEIC открываются не&nbsp;во&nbsp;всех браузерах. Если&nbsp;фото не&nbsp;открылось, сохраните его как&nbsp;JPEG.</li>

@@ -391,6 +391,8 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
     const [x0, y0, x1, y1] = rectOf(b, k, vw, vh);
     if (inner[Math.min(vh - 1, (y0 + y1) >> 1) * vw + Math.min(vw - 1, (x0 + x1) >> 1)]) periods.push(b.period);
   }
+  // правки пользователя: кисть всегда обрабатывается целиком
+  if (opts.add) for (let i = 0; i < nv; i++) if (opts.add[i]) { core[i] = 1; tex[i] = 1; }
   const hard = Uint8Array.from(skin, (v, i) => (v || tex[i] ? 1 : 0));
 
   progress("Уточняю край кожи", 40);
@@ -423,6 +425,8 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
     alpha = boxMean(a2, vw, vh, 1);
     for (let i = 0; i < nv; i++) if (a2[i]) alpha[i] = Math.max(alpha[i], 0.75);
   }
+  // ластик: здесь остаётся оригинал
+  if (opts.remove) for (let i = 0; i < nv; i++) if (opts.remove[i]) alpha[i] = 0;
   const list = (periods.length ? periods : periodsAny).sort((a, b) => a - b);
   const P = list.length ? list[list.length >> 1] : 18, sigma = Math.min(40, Math.max(8, P));
 
@@ -469,7 +473,7 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
     alpha, residual: residual.map((b) => rectOf(b, k, vw, vh)),
     stats: {
       P, sigma, sigmaMax: s2, maskFrac: total / nv, checkedFrac: total ? checked / total : 0,
-      farHits: far.length, rejected, noSkin: !ss, farFrac: farArea / nv, keepFar: !!opts.keepFar,
+      farHits: far.length, rejected, noSkin: !ss, farFrac: farArea / nv, keepFar: !!opts.keepFar, edited: !!(opts.add || opts.remove),
       blocks: blocks.length, hits: hits.length, firstResidual, residual: residual.length, ms: Date.now() - t0,
     },
   };

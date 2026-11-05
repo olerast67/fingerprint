@@ -8,7 +8,11 @@ const ui = {
   result: $("#result"), img: $("#shown"), summary: $("#summary"), download: $("#download"),
   tabs: [...document.querySelectorAll("[data-show]")], error: $("#error"), again: $("#again"),
   rMask: $("#r-mask"), rPeriod: $("#r-period"), rCheck: $("#r-check"), keepFar: $("#keepfar"),
+  paint: $("#paint"), tools: $("#tools"), size: $("#size"), apply: $("#apply"), reset: $("#reset"),
+  toolBtns: [...document.querySelectorAll("[data-tool]")],
 };
+// правки маски на рабочей копии: add закрашено кистью, remove стёрто ластиком
+const edit = { tool: null, add: null, remove: null, vw: 0, vh: 0, keepFar: false };
 let segmenter = null, urls = {}, busy = false, lastFile = null;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
@@ -70,6 +74,34 @@ function viewOf(bitmap) {
   return { data: ctx.getImageData(0, 0, vw, vh).data, vw, vh, canvas: c };
 }
 
+function resetEdits(vw, vh) {
+  Object.assign(edit, { vw, vh, add: new Uint8Array(vw * vh), remove: new Uint8Array(vw * vh), dirty: false });
+  ui.paint.width = vw; ui.paint.height = vh;
+  drawEdits();
+}
+
+// мазок кистью или ластиком: круг в масках рабочей копии
+function stroke(e) {
+  const r = ui.paint.getBoundingClientRect(), k = edit.vw / r.width;
+  const cx = (e.clientX - r.left) * k, cy = (e.clientY - r.top) * k, rad = +ui.size.value * k / 2;
+  const on = edit.tool === "add" ? edit.add : edit.remove, off = edit.tool === "add" ? edit.remove : edit.add;
+  for (let y = Math.max(0, Math.floor(cy - rad)); y < Math.min(edit.vh, Math.ceil(cy + rad)); y++)
+    for (let x = Math.max(0, Math.floor(cx - rad)); x < Math.min(edit.vw, Math.ceil(cx + rad)); x++)
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= rad * rad) { on[y * edit.vw + x] = 1; off[y * edit.vw + x] = 0; }
+  edit.dirty = true;
+  if (!edit.raf) edit.raf = requestAnimationFrame(() => { edit.raf = 0; drawEdits(); });
+}
+
+function drawEdits() {
+  if (!edit.vw || !edit.add) return;
+  const ctx = ui.paint.getContext("2d"), img = ctx.createImageData(edit.vw, edit.vh), d = img.data;
+  for (let i = 0; i < edit.add.length; i++) {
+    if (edit.add[i]) { d[i * 4] = 63; d[i * 4 + 1] = 240; d[i * 4 + 2] = 216; d[i * 4 + 3] = 150; }
+    else if (edit.remove[i]) { d[i * 4] = 6; d[i * 4 + 1] = 18; d[i * 4 + 2] = 17; d[i * 4 + 3] = 170; }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 function setState(s) {
   ui.drop.hidden = s !== "idle";
   ui.work.hidden = s !== "work";
@@ -81,6 +113,8 @@ function show(which) {
   ui.img.src = urls[which];
   ui.img.alt = { after: "Фото после обработки", before: "Исходное фото, его не публикуйте", map: "Карта: бирюзовым обработанная кожа, пурпурным места для проверки" }[which];
   for (const t of ui.tabs) t.setAttribute("aria-pressed", String(t.dataset.show === which));
+  ui.tools.hidden = which !== "map";
+  ui.paint.hidden = which !== "map";
 }
 
 function readout(st) {
@@ -143,7 +177,10 @@ async function handle(file, opts = {}) {
         else reject(Object.assign(new Error(m.message), { memory: m.memory }));
       };
       worker.onerror = (e) => reject(new Error(e.message || "Ошибка в фоновом потоке"));
-      worker.postMessage({ bitmap, view: view.data, vw: view.vw, vh: view.vh, conf, opts }, [bitmap, view.data.buffer, conf.buffer]);
+      if (edit.vw !== view.vw || edit.vh !== view.vh) resetEdits(view.vw, view.vh);
+    edit.keepFar = !!opts.keepFar;
+    const wopts = { keepFar: edit.keepFar, add: edit.dirty ? edit.add.slice() : null, remove: edit.dirty ? edit.remove.slice() : null };
+    worker.postMessage({ bitmap, view: view.data, vw: view.vw, vh: view.vh, conf, opts: wopts }, [bitmap, view.data.buffer, conf.buffer]);
     });
     urls.after = URL.createObjectURL(done.blob);
     view.canvas.getContext("2d").putImageData(new ImageData(done.map, view.vw, view.vh), 0, 0);
@@ -153,6 +190,7 @@ async function handle(file, opts = {}) {
     ui.summary.textContent = describe(done.stats, scaled);
     ui.keepFar.hidden = !(done.stats.farFrac > 0.002) || done.stats.keepFar;
     readout(done.stats);
+    drawEdits();
     window.__lastStats = done.stats;
     show(done.stats.residual || !done.stats.maskFrac ? "map" : "after");
     setState("done");
@@ -167,17 +205,25 @@ async function handle(file, opts = {}) {
   }
 }
 
-ui.file.addEventListener("change", () => handle(ui.file.files[0]));
+ui.file.addEventListener("change", () => { edit.vw = 0; handle(ui.file.files[0]); });
 ui.pick.addEventListener("click", () => ui.file.click());
 ui.again.addEventListener("click", () => setState("idle"));
 ui.keepFar.addEventListener("click", () => handle(lastFile, { keepFar: true }));
+ui.apply.addEventListener("click", () => handle(lastFile, { keepFar: edit.keepFar }));
+ui.reset.addEventListener("click", () => { resetEdits(edit.vw, edit.vh); handle(lastFile, { keepFar: edit.keepFar }); });
+for (const b of ui.toolBtns) b.addEventListener("click", () => {
+  edit.tool = edit.tool === b.dataset.tool ? null : b.dataset.tool;
+  for (const x of ui.toolBtns) x.setAttribute("aria-pressed", String(x.dataset.tool === edit.tool));
+});
+ui.paint.addEventListener("pointerdown", (e) => { if (!edit.tool) return; ui.paint.setPointerCapture(e.pointerId); stroke(e); });
+ui.paint.addEventListener("pointermove", (e) => { if (edit.tool && e.buttons) stroke(e); });
 for (const t of ui.tabs) t.addEventListener("click", () => show(t.dataset.show));
 for (const ev of ["dragenter", "dragover"]) ui.drop.addEventListener(ev, (e) => { e.preventDefault(); ui.drop.classList.add("over"); });
 for (const ev of ["dragleave", "drop"]) ui.drop.addEventListener(ev, () => ui.drop.classList.remove("over"));
 ui.drop.addEventListener("drop", (e) => {
   e.preventDefault();
   const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/"));
-  if (f) handle(f);
+  if (f) { edit.vw = 0; handle(f); }
 });
 document.querySelectorAll(".retry").forEach((b) => b.addEventListener("click", () => setState("idle")));
 
