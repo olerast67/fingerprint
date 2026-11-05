@@ -11,3 +11,9 @@ node_modules/
 __pycache__/
 dist/
 .claude/
+
+# сборка C#
+dev/afis/bin/
+dev/afis/obj/
+# модели MediaPipe скачиваются заново
+dev/models/
