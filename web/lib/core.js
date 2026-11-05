@@ -88,7 +88,7 @@ export function gaussBlur(a, w, h, sigma) {
 }
 
 // ---------- карта полос (слой 2) ----------
-function analyseScale(gray, w, h, d, include, out) {
+function analyseScale(gray, w, h, d, include, out, weight) {
   const M = 56, ROWS = 4;
   for (let by0 = 0; by0 + B <= h; by0 += STEP * ROWS) {
     const list = [];
@@ -105,6 +105,7 @@ function analyseScale(gray, w, h, d, include, out) {
     for (let i = 0; i < n; i++) { hp[i] = g[i] - bl[i]; sq[i] = hp[i] * hp[i]; }
     const sd = gaussBlur(sq, sw, sh, 8);
     for (let i = 0; i < n; i++) { const v = hp[i] / (Math.sqrt(sd[i]) + 1); hp[i] = v > 2 ? 2 : v < -2 ? -2 : v; }
+    if (weight) for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) hp[y * sw + x] *= weight((x0 + x) * d, (y0 + y) * d);
     const sm = gaussBlur(hp, sw, sh, 1), gx = new Float32Array(n), gy = new Float32Array(n);
     for (let y = 1; y < sh - 1; y++) for (let x = 1; x < sw - 1; x++) {
       const o = y * sw + x;
@@ -113,7 +114,7 @@ function analyseScale(gray, w, h, d, include, out) {
     }
     for (let q = 0; q < list.length; q += 2) {
       const r = blockStats(hp, gx, gy, sq, sw, list[q] - x0, list[q + 1] - y0);
-      if (r) out.push({ x: list[q] * d, y: list[q + 1] * d, s: B * d, coh: r.coh, peak: r.peak, period: r.period * d, amp: r.amp });
+      if (r) out.push({ x: list[q] * d, y: list[q + 1] * d, s: B * d, coh: r.coh, peak: r.peak, period: r.period * d, amp: r.amp, theta: r.theta });
     }
   }
 }
@@ -126,11 +127,12 @@ function blockStats(hp, gx, gy, sq, w, x, y) {
   }
   // amp: сила мелких деталей в единицах яркости до выравнивания контраста
   const amp = Math.sqrt(e / (B * B));
+  const theta = 0.5 * Math.atan2(2 * gxy, gxx - gyy);   // направление линий в плитке
   const den = gxx + gyy;
   if (den < 1e-3) return null;
   const coh = Math.sqrt((gxx - gyy) ** 2 + 4 * gxy * gxy) / den;
   // оценка = coh × (не больше 1), поэтому при coh < THR плитка заведомо не пройдёт: спектр не нужен
-  if (coh < THR) return { coh, peak: 0, period: 0, amp };
+  if (coh < THR) return { coh, peak: 0, period: 0, amp, theta };
   m /= B * B;
   for (let j = 0; j < B; j++) {
     const o = (y + j) * w + x;
@@ -152,7 +154,7 @@ function blockStats(hp, gx, gy, sq, w, x, y) {
     return s;
   };
   const peak = (around(iy, ix) + around((-iy) & (N - 1), (-ix) & (N - 1))) / (tot + 1e-6);
-  return { coh, peak, period: PERIOD[bi], amp };
+  return { coh, peak, period: PERIOD[bi], amp, theta };
 }
 
 export const score = (b) => b.coh * Math.min(b.peak / 0.4, 1);
@@ -171,11 +173,11 @@ function downscale(gray, w, h, d) {
   }
   return [out, dw, dh];
 }
-export function ridgeBlocks(rgba, W, H, include) {
+export function ridgeBlocks(rgba, W, H, include, weight) {
   const gray = toGray(rgba, W * H), out = [];
   for (const d of SCALES) {
     const [g, w, h] = d === 1 ? [gray, W, H] : downscale(gray, W, H, d);
-    analyseScale(g, w, h, d, include, out);
+    analyseScale(g, w, h, d, include, out, weight);
   }
   return out;
 }
@@ -245,7 +247,7 @@ function colorStats(lab, sel) {
     const d0 = lab[i * 3] - m[0], d1 = lab[i * 3 + 1] - m[1], d2 = lab[i * 3 + 2] - m[2], d = [d0, d1, d2];
     for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) c[a * 3 + b] += d[a] * d[b];
   }
-  for (let k = 0; k < 9; k++) c[k] = c[k] / (n - 1) + (k % 4 === 0 ? 4 : 0);
+  for (let k = 0; k < 9; k++) c[k] = c[k] / (n - 1) + (k % 4 === 0 ? 50 : 0);   // нижняя граница разброса цвета
   const [a, b, cc, d, e, f, g, h, i] = c, det = a * (e * i - f * h) - b * (d * i - f * g) + cc * (d * h - e * g);
   const inv = [e * i - f * h, cc * h - b * i, b * f - cc * e, f * g - d * i, a * i - cc * g, cc * d - a * f, d * h - e * g, b * g - a * h, a * e - b * d].map((v) => v / det);
   return { m, inv };
@@ -273,6 +275,23 @@ function integral(m, w, h) {
     if (x1 <= x0 || y1 <= y0) return 0;
     return s[y1 * (w + 1) + x1] - s[y0 * (w + 1) + x1] - s[y1 * (w + 1) + x0] + s[y0 * (w + 1) + x0];
   };
+}
+
+// группы плиток с полосами вдали от кожи: связываем пересекающиеся квадраты
+function clusterFar(list) {
+  const n = list.length, parent = Int32Array.from({ length: n }, (_, i) => i);
+  const find = (i) => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    const a = list[i], b = list[j];
+    if (a.x < b.x + b.s && b.x < a.x + a.s && a.y < b.y + b.s && b.y < a.y + a.s) parent[find(i)] = find(j);
+  }
+  const groups = new Map();
+  for (let i = 0; i < n; i++) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(list[i]); }
+  return [...groups.values()].map((g) => {
+    let c = 0, s = 0;
+    for (const b of g) { c += Math.cos(2 * b.theta); s += Math.sin(2 * b.theta); }
+    return { blocks: g, n: g.length, spread: 1 - Math.hypot(c, s) / g.length };
+  });
 }
 
 // ---------- склейка на полном кадре ----------
@@ -321,40 +340,58 @@ function scrubPass(rgba, W, H, alpha, vw, vh, sigma) {
 // ---------- весь конвейер ----------
 // rgba: Uint8ClampedArray полного кадра (меняется на месте); view: RGBA рабочей копии vw×vh;
 // conf: Float32Array 256×256, уверенность «кожа» от MediaPipe SelfieMulticlass (классы 2+3).
-export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}) {
+const rectOf = (b, k, vw, vh) => [Math.floor(b.x * k), Math.floor(b.y * k), Math.min(vw, Math.ceil((b.x + b.s) * k)), Math.min(vh, Math.ceil((b.y + b.s) * k))];
+function paint(mask, vw, b, k, vh, value = 1, shrink = 0) {
+  let [x0, y0, x1, y1] = rectOf(b, k, vw, vh);
+  const dx = Math.floor((x1 - x0) * shrink), dy = Math.floor((y1 - y0) * shrink);
+  x0 += dx; x1 -= dx; y0 += dy; y1 -= dy;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mask[y * vw + x] = Math.max(mask[y * vw + x], value);
+}
+// шаг у края диапазона масштаба недостоверен: там граница полосы или гармоника
+const goodPeriod = (b) => { const d = b.s / B; return b.period >= 5.75 * d && b.period <= 18.5 * d; };
+
+// rgba: Uint8ClampedArray полного кадра (меняется на месте); view: RGBA рабочей копии vw×vh;
+// conf: Float32Array vw×vh, уверенность «кожа» от MediaPipe SelfieMulticlass (классы 2+3).
+// opts.keepFar: не трогать полосы вдали от кожи (дерево, ткань), по выбору пользователя.
+export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}, opts = {}) {
   const t0 = Date.now(), nv = vw * vh, k = vw / W;
   progress("Ищу кожу", 5);
-  const skinF = resizeBilinear(conf, 256, 256, vw, vh), skin = Uint8Array.from(skinF, (v) => (v > 0.5 ? 1 : 0));
+  const skin = Uint8Array.from(conf, (v) => (v > 0.5 ? 1 : 0));
   const near = dilate(skin, vw, vh, Math.round(NEAR * vw)), inner = erode(skin, vw, vh, 15);
   const nearSum = integral(near, vw, vh);
-  const includeNear = (x, y, s) => nearSum(Math.floor(x * k), Math.floor(y * k), Math.ceil((x + s) * k), Math.ceil((y + s) * k)) > 0;
+  const isNear = (b) => { const [x0, y0, x1, y1] = rectOf(b, k, vw, vh); return nearSum(x0, y0, x1, y1) > 0; };
 
   progress("Ищу папиллярный узор", 15);
-  const blocks = ridgeBlocks(rgba, W, H, includeNear), hits = blocks.filter((b) => score(b) >= THR);
-  const tex = new Uint8Array(nv), periods = [], periodsAny = [];
+  const blocks = ridgeBlocks(rgba, W, H, () => true);
+  let hits = blocks.filter((b) => score(b) >= THR);
+  const far = hits.filter((b) => !isNear(b));
+  if (opts.keepFar) hits = hits.filter(isNear);
+  // плитка с полосами входит в маску целиком, её середина без проверки цветом
+  const tex = new Uint8Array(nv), core = new Uint8Array(nv), periods = [], periodsAny = [];
   for (const b of hits) {
-    const x0 = Math.floor(b.x * k), y0 = Math.floor(b.y * k), x1 = Math.min(vw, Math.ceil((b.x + b.s) * k)), y1 = Math.min(vh, Math.ceil((b.y + b.s) * k));
-    for (let y = y0; y < y1; y++) tex.fill(1, y * vw + x0, y * vw + x1);
+    paint(tex, vw, b, k, vh); paint(core, vw, b, k, vh, 1, 0.25);
+    if (!goodPeriod(b)) continue;
     periodsAny.push(b.period);
-    const cx = Math.min(vw - 1, (x0 + x1) >> 1), cy = Math.min(vh - 1, (y0 + y1) >> 1);
-    if (inner[cy * vw + cx]) periods.push(b.period);
+    const [x0, y0, x1, y1] = rectOf(b, k, vw, vh);
+    if (inner[Math.min(vh - 1, (y0 + y1) >> 1) * vw + Math.min(vw - 1, (x0 + x1) >> 1)]) periods.push(b.period);
   }
-  const hard = new Uint8Array(nv);
-  for (let i = 0; i < nv; i++) hard[i] = skin[i] || (tex[i] && near[i]) ? 1 : 0;
+  const hard = Uint8Array.from(skin, (v, i) => (v || tex[i] ? 1 : 0));
 
-  progress("Уточняю край кожи", 45);
-  const ring = dilate(hard, vw, vh, 15), lab = toLab(view, nv);
-  const bgSel = Uint8Array.from(ring, (v, i) => v && !hard[i]);
+  progress("Уточняю край кожи", 40);
+  // кольцо не уже двух клеток сетки модели кожи: её край может уходить внутрь пальца
+  const ringW = Math.max(15, Math.ceil(2 * vw / 256));
+  const ring = dilate(hard, vw, vh, ringW), lab = toLab(view, nv);
+  const bgSel = Uint8Array.from(ring, (v, i) => (v && !hard[i] ? 1 : 0));
   const ss = colorStats(lab, skin), bs = colorStats(lab, bgSel);
   let fg = new Uint8Array(nv);
-  for (let i = 0; i < nv; i++) fg[i] = skin[i] || (hard[i] && (!ss || !bs || maha(lab, i, ss) < maha(lab, i, bs))) ? 1 : 0;
+  for (let i = 0; i < nv; i++) fg[i] = skin[i] || core[i] || (ring[i] && (!ss || !bs || maha(lab, i, ss) < maha(lab, i, bs))) ? 1 : 0;
   fg = dilate(erode(fg, vw, vh, 2), vw, vh, 2);
-  for (let i = 0; i < nv; i++) if (skin[i]) fg[i] = 1;
+  for (let i = 0; i < nv; i++) if (skin[i] || core[i]) fg[i] = 1;
   const I = new Float32Array(nv);
   for (let i = 0; i < nv; i++) I[i] = (0.299 * view[i * 4] + 0.587 * view[i * 4 + 1] + 0.114 * view[i * 4 + 2]) / 255;
   const g = guided(I, Float32Array.from(fg), vw, vh, 3, 1e-4);
   let alpha = new Float32Array(nv);
-  for (let i = 0; i < nv; i++) alpha[i] = Math.min(1, Math.max(0, (g[i] - 0.35) / 0.3));
+  for (let i = 0; i < nv; i++) alpha[i] = core[i] ? 1 : Math.min(1, Math.max(0, (g[i] - 0.35) / 0.3));
   { // запас 1 px наружу
     const a2 = new Float32Array(nv);
     for (let y = 0; y < vh; y++) for (let x = 0; x < vw; x++) {
@@ -367,51 +404,63 @@ export function processImage(rgba, W, H, view, vw, vh, conf, progress = () => {}
     }
     alpha = a2;
   }
-  periods.sort((a, b) => a - b);
-  const list = periods.length ? periods : periodsAny.sort((a, b) => a - b);
+  const list = (periods.length ? periods : periodsAny).sort((a, b) => a - b);
   const P = list.length ? list[list.length >> 1] : 18, sigma = Math.min(40, Math.max(8, P));
 
-  progress("Стираю узор", 60);
+  progress("Стираю узор", 55);
   scrubPass(rgba, W, H, alpha, vw, vh, sigma);
+  // палец ближе к камере даёт линии крупнее: у таких плиток своя, более сильная сигма
+  const bigger = hits.filter((b) => goodPeriod(b) && b.period > sigma * 1.2);
+  for (const [lo, hi] of [[sigma * 1.2, sigma * 2], [sigma * 2, sigma * 3], [sigma * 3, 1e9]]) {
+    const group = bigger.filter((b) => b.period > lo && b.period <= hi);
+    if (!group.length) continue;
+    const extra = new Float32Array(nv);
+    for (const b of group) paint(extra, vw, b, k, vh);
+    for (let i = 0; i < nv; i++) extra[i] *= alpha[i];
+    scrubPass(rgba, W, H, extra, vw, vh, Math.min(60, Math.max(...group.map((b) => b.period))));
+  }
 
-  progress("Проверяю результат", 80);
-  // проверяем только плитки целиком внутри кожи: плитка с контуром пальца даёт ложную тревогу
-  const deepSum = integral(Uint8Array.from(alpha, (v) => (v > 0.9 ? 1 : 0)), vw, vh);
-  const deep = (x, y, s) => {
-    const x0 = Math.floor(x * k), y0 = Math.floor(y * k), x1 = Math.ceil((x + s) * k), y1 = Math.ceil((y + s) * k);
-    return x1 <= vw && y1 <= vh && deepSum(x0, y0, x1, y1) >= (x1 - x0) * (y1 - y0);
-  };
-  // остатком считаем полосы с шагом от 0,5P до 3P: крупнее размытие с сигмой P сохраняет намеренно
-  const isResidual = (b) => score(b) >= THR && b.period >= 0.5 * P && b.period <= 3 * P;
-  let residual = ridgeBlocks(rgba, W, H, deep).filter(isResidual);
+  progress("Проверяю результат", 75);
+  // проверка с весом маски: контур пальца и фон вне кожи не дают ложной тревоги
+  const safe = erode(Uint8Array.from(alpha, (v) => (v > 0.5 ? 1 : 0)), vw, vh, 2);
+  const safeSum = integral(safe, vw, vh);
+  const S = sampler(alpha, vw, vh, W, H);
+  const weight = (x, y) => safe[S.yi[Math.min(H - 1, y)] * vw + S.xi[Math.min(W - 1, x)]];
+  const covered = (x, y, s) => { const [x0, y0, x1, y1] = rectOf({ x, y, s }, k, vw, vh); const a = (x1 - x0) * (y1 - y0); return a > 0 && safeSum(x0, y0, x1, y1) >= 0.5 * a; };
+  const isResidual = (b) => score(b) >= THR && b.period <= 4 * PMAX;
+  let residual = ridgeBlocks(rgba, W, H, covered, weight).filter(isResidual);
   const firstResidual = residual.length;
   let s2 = sigma;
   for (let pass = 0; pass < 2 && residual.length; pass++) {
-    progress("Дочищаю остатки", 88 + pass * 5);
-    // палец ближе к камере даёт линии крупнее: размываем по шагу самих остатков
+    progress("Дочищаю остатки", 85 + pass * 6);
     s2 = Math.min(60, Math.max(s2 * 1.5, ...residual.map((b) => b.period)));
     const extra = new Float32Array(nv);
-    for (const b of residual) {
-      const x0 = Math.floor(b.x * k), y0 = Math.floor(b.y * k), x1 = Math.min(vw, Math.ceil((b.x + b.s) * k)), y1 = Math.min(vh, Math.ceil((b.y + b.s) * k));
-      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) extra[y * vw + x] = alpha[y * vw + x];
-    }
+    for (const b of residual) paint(extra, vw, b, k, vh);
+    for (let i = 0; i < nv; i++) extra[i] *= alpha[i];
     scrubPass(rgba, W, H, extra, vw, vh, s2);
-    residual = ridgeBlocks(rgba, W, H, deep).filter(isResidual);
+    residual = ridgeBlocks(rgba, W, H, covered, weight).filter(isResidual);
   }
-
-  const overlay = new Uint8ClampedArray(view);
-  for (let i = 0; i < nv; i++) if (alpha[i] > 0.5) { overlay[i * 4] = overlay[i * 4] * 0.45 + 35; overlay[i * 4 + 1] = overlay[i * 4 + 1] * 0.45 + 132; overlay[i * 4 + 2] = overlay[i * 4 + 2] * 0.45 + 119; }
-  for (const b of residual) {
-    const x0 = Math.floor(b.x * k), y0 = Math.floor(b.y * k), x1 = Math.min(vw, Math.ceil((b.x + b.s) * k)), y1 = Math.min(vh, Math.ceil((b.y + b.s) * k));
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const o = (y * vw + x) * 4; overlay[o] = 255; overlay[o + 1] = 46; overlay[o + 2] = 136; }
-  }
+  let checked = 0, total = 0, farArea = 0;
+  const fm = new Uint8Array(nv);
+  for (const b of far) paint(fm, vw, b, k, vh);
+  for (let i = 0; i < nv; i++) { if (alpha[i] > 0.5) total++; if (safe[i]) checked++; if (fm[i] && alpha[i] > 0.5) farArea++; }
   progress("Готово", 100);
-  let maskFrac = 0; for (let i = 0; i < nv; i++) maskFrac += alpha[i] > 0.5 ? 1 : 0;
   return {
-    overlay,
-    stats: { P, sigma, sigmaMax: s2, maskFrac: maskFrac / nv, blocks: blocks.length, hits: hits.length, firstResidual, residual: residual.length,
-      residualBlocks: residual.map((b) => ({ x: b.x, y: b.y, s: b.s, period: +b.period.toFixed(1), amp: +b.amp.toFixed(2), coh: +b.coh.toFixed(2), peak: +b.peak.toFixed(2) })), ms: Date.now() - t0 },
+    alpha, residual: residual.map((b) => rectOf(b, k, vw, vh)),
+    stats: {
+      P, sigma, sigmaMax: s2, maskFrac: total / nv, checkedFrac: total ? checked / total : 0,
+      farHits: far.length, farFrac: farArea / nv, keepFar: !!opts.keepFar,
+      blocks: blocks.length, hits: hits.length, firstResidual, residual: residual.length, ms: Date.now() - t0,
+    },
   };
+}
+
+// карта для показа: обработанная рабочая копия, кожа бирюзовым, места для проверки пурпурным
+export function tint(view, vw, vh, alpha, residual) {
+  const o = new Uint8ClampedArray(view);
+  for (let i = 0; i < vw * vh; i++) if (alpha[i] > 0.5) { o[i * 4] = o[i * 4] * 0.45 + 35; o[i * 4 + 1] = o[i * 4 + 1] * 0.45 + 132; o[i * 4 + 2] = o[i * 4 + 2] * 0.45 + 119; }
+  for (const [x0, y0, x1, y1] of residual) for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const q = (y * vw + x) * 4; o[q] = 255; o[q + 1] = 46; o[q + 2] = 136; }
+  return o;
 }
 
 export { VIEW };

@@ -6,6 +6,7 @@
 <title>Без отпечатков</title>
 <meta name="description" content="Стирает папиллярный узор пальцев и ладоней с фото прямо в браузере. Снимок никуда не отправляется.">
 <meta name="color-scheme" content="dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob: data:; img-src 'self' blob: data:; worker-src 'self' blob:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="preload" href="fonts/jura-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="style.css">
@@ -39,6 +40,7 @@
         <img id="shown" alt="" width="1600" height="900">
         <div class="actions">
           <a id="download" class="cta" href="#">Скачать чистое фото</a>
+          <button id="keepfar" type="button" hidden>Вернуть полосы вне кожи</button>
           <button id="again" type="button">Другое фото</button>
         </div>
       </div>
